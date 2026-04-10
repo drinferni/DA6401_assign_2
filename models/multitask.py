@@ -31,9 +31,9 @@ class MultiTaskPerceptionModel(nn.Module):
         self.full_segmentator= VGG11UNet()
         self.segmentator_head = self.full_segmentator.segmentation_head
 
-        gdown.download(id="1C73aVXsmAdoVlq5URN6GeOl_k8QbGl9-", output="classifier.pth", quiet=False)
-        gdown.download(id="1_j9NO2fW52XH2bPCB1IU-Dq0Ec-SeDfp", output="localizer.pth", quiet=False)
-        gdown.download(id="1FnxEYU5SRtx81BTw_1zS5GcXRJGFDMcQ", output="unet.pth", quiet=False)
+        gdown.download(id="1HqClAACl_iK59YmA0HEqiQiPoIUWLeJ_", output="classifier.pth", quiet=False)
+        gdown.download(id="1yK0Lk8zhNrrHhrEgkSp44LlXpWE_JVhu", output="localizer.pth", quiet=False)
+        gdown.download(id="1BtB5vllX45j387UYStMrXb-54NLY2Y9g", output="unet.pth", quiet=False)
 
     def load_from_checkpoints(self, cls_path = "classifier.pth", loc_path = "localizer.pth", unet_path = "unet.pth"):
         # --- Load Task 1 (Backbone + Classifier Head) ---

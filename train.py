@@ -20,7 +20,7 @@ def cleanup():
 
 # --- Common Setup ---
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-EPOCHS = 2
+EPOCHS = 20
 BATCH_SIZE = 16
 
 def get_dataloader():
@@ -146,8 +146,8 @@ def main():
     train_loader = get_dataloader()
 
     # Train models one by one to save GPU space
-    train_classifier(train_loader)
-    train_localizer(train_loader)
+    # train_classifier(train_loader)
+    # train_localizer(train_loader)
     train_segmenter(train_loader)
 
     print("\nAll models trained sequentially.")
