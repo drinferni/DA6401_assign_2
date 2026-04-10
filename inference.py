@@ -6,98 +6,71 @@ import albumentations as A
 from albumentations.pytorch import ToTensorV2
 import wandb
 from tqdm import tqdm
-import gc
+import numpy as np
+from sklearn.metrics import f1_score
 
 # Import your classes
 from data.pets_dataset import OxfordIIITPetDataset
 from models import *
 from losses.iou_loss import IoULoss
-from train import cleanup, save_checkpoint
 
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-EPOCHS = 2
 BATCH_SIZE = 16
 
-def get_dataloader():
-    train_transform = A.Compose([
-        A.Resize(224, 224),
-        A.HorizontalFlip(p=0.5),
-        A.Normalize(),
-        ToTensorV2()
-    ], bbox_params=A.BboxParams(format='pascal_voc', label_fields=['category_ids']))
+def calculate_bbox_iou(pred_box, gt_box):
+    """Calculates IoU for [x_center, y_center, w, h] format."""
+    # Convert center to corners
+    p_x1 = pred_box[:, 0] - pred_box[:, 2]/2
+    p_y1 = pred_box[:, 1] - pred_box[:, 3]/2
+    p_x2 = pred_box[:, 0] + pred_box[:, 2]/2
+    p_y2 = pred_box[:, 1] + pred_box[:, 3]/2
 
-    train_ds = OxfordIIITPetDataset(root_dir="./data", split="test", transform=train_transform)
-    return DataLoader(train_ds, batch_size=BATCH_SIZE, shuffle=True)
+    g_x1 = gt_box[:, 0] - gt_box[:, 2]/2
+    g_y1 = gt_box[:, 1] - gt_box[:, 3]/2
+    g_x2 = gt_box[:, 0] + gt_box[:, 2]/2
+    g_y2 = gt_box[:, 1] + gt_box[:, 3]/2
 
+    # Intersection
+    i_x1 = torch.max(p_x1, g_x1)
+    i_y1 = torch.max(p_y1, g_y1)
+    i_x2 = torch.min(p_x2, g_x2)
+    i_y2 = torch.min(p_y2, g_y2)
+
+    inter_area = torch.clamp(i_x2 - i_x1, min=0) * torch.clamp(i_y2 - i_y1, min=0)
+    
+    # Union
+    p_area = (p_x2 - p_x1) * (p_y2 - p_y1)
+    g_area = (g_x2 - g_x1) * (g_y2 - g_y1)
+    union_area = p_area + g_area - inter_area
+    
+    return inter_area / (union_area + 1e-6)
+
+def calculate_dice(pred_mask, gt_mask, num_classes=3):
+    """Calculates Macro-Dice Score."""
+    dice_scores = []
+    # pred_mask: [B, H, W], gt_mask: [B, H, W]
+    for i in range(num_classes):
+        p = (pred_mask == i).float()
+        g = (gt_mask == i).float()
+        intersection = (p * g).sum()
+        dice = (2. * intersection) / (p.sum() + g.sum() + 1e-6)
+        dice_scores.append(dice.item())
+    return np.mean(dice_scores)
 
 def train_multi(test_loader):
-    print("\n--- Training Multi ---")
+    print("\n--- Evaluating Multi-Task Pipeline ---")
 
     model = MultiTaskPerceptionModel(num_breeds=37, seg_classes=3)
     model.load_from_checkpoints()
-    model.to(DEVICE).eval()
-
-    
-    criterion_cls = nn.CrossEntropyLoss()
-    # criterion_loc = IoULoss()
-    criterion_iou = IoULoss()
-    criterion_mse = nn.MSELoss() # Assuming standard PyTorch MSE
-    criterion_seg = nn.CrossEntropyLoss() # For 3-class trimap
-    optimizer = optim.Adam(model.parameters(), lr=1e-4)
-
-    # 6. Loop
-    # model.train()
-    # for epoch in range(2):
-    #     total_loss = 0
-    #     for images, targets in tqdm(train_loader):
-    #         images = images.to(DEVICE)
-    #         labels = targets['label'].to(DEVICE)
-    #         boxes = targets['bbox'].to(DEVICE)
-    #         masks = targets['mask'].to(DEVICE).long().squeeze(1)
-
-    #         optimizer.zero_grad()
-    #         outputs = model(images)
-
-    #         # Combined Loss Calculation (Task 1.4)
-    #         loss_cls = criterion_cls(outputs['classification'], labels)
-    #         # loss_loc = criterion_loc(outputs['localization'], boxes)
-    #         # Calculate individual losses
-    #         loss_iou = criterion_iou(outputs['localization'], boxes)
-    #         loss_mse = criterion_mse(outputs['localization'], boxes)
-
-    #         # Combine them
-    #         loss_loc = loss_iou + loss_mse
-    #         loss_seg = criterion_seg(outputs['segmentation'], masks)
-            
-    #         # Weighing losses (adjust based on empirical results)
-    #         loss = loss_cls + (2.0 * loss_loc) + loss_seg
-    #         loss.backward()
-    #         optimizer.step()
-            
-    #         total_loss += loss.item()
-
-    #     # Log to W&B
-    #     wandb.log({
-    #         "epoch": epoch,
-    #         "train_loss": total_loss / len(train_loader),
-    #         "cls_loss": loss_cls.item(),
-    #         "loc_loss": loss_loc.item(),
-    #         "seg_loss": loss_seg.item()
-    #     })
-    #     print(f"Epoch {epoch} Loss: {total_loss/len(train_loader):.4f}")
-
+    model.to(DEVICE)
     model.eval()
-    
-    total_test_loss = 0
-    total_cls_loss = 0
-    total_loc_loss = 0
-    total_seg_loss = 0
-    
-    # Optional: Track metrics for better testing insights
-    correct_cls = 0
-    total_samples = 0
 
-    # 2. Disable gradient tracking
+    # Metrics Accumulators
+    all_cls_preds = []
+    all_cls_gt = []
+    all_ious = []
+    all_dices = []
+
     with torch.no_grad():
         for images, targets in tqdm(test_loader, desc="Testing"):
             images = images.to(DEVICE)
@@ -105,60 +78,72 @@ def train_multi(test_loader):
             boxes = targets['bbox'].to(DEVICE)
             masks = targets['mask'].to(DEVICE).long().squeeze(1)
 
-            # 3. Forward pass
             outputs = model(images)
 
-            # Calculate individual losses (same logic as training for comparison)
-            loss_cls = criterion_cls(outputs['classification'], labels)
-            
-            loss_iou = criterion_iou(outputs['localization'], boxes)
-            loss_mse = criterion_mse(outputs['localization'], boxes)
-            loss_loc = loss_iou + loss_mse
-            
-            loss_seg = criterion_seg(outputs['segmentation'], masks)
-            
-            # Combine losses
-            loss = loss_cls + loss_loc + loss_seg
+            # 1. Classification Data
+            _, preds = torch.max(outputs['classification'], 1)
+            all_cls_preds.extend(preds.cpu().numpy())
+            all_cls_gt.extend(labels.cpu().numpy())
 
-            # Accumulate losses
-            total_test_loss += loss.item()
-            total_cls_loss += loss_cls.item()
-            total_loc_loss += loss_loc.item()
-            total_seg_loss += loss_seg.item()
+            # 2. Localization IoU
+            # Note: If your loss is 17000, your boxes are likely in pixels (0-224)
+            # but your model might be outputting 0-1. Ensure they match here!
+            batch_ious = calculate_bbox_iou(outputs['localization'], boxes)
+            all_ious.extend(batch_ious.cpu().numpy())
 
-            # --- Calculate Additional Metrics (Recommended) ---
-            # Classification Accuracy
-            _, predicted = torch.max(outputs['classification'], 1)
-            total_samples += labels.size(0)
-            correct_cls += (predicted == labels).sum().item()
-            
-            # You could also add Mask IoU or Bbox IoU metrics here
-            # --------------------------------------------------
+            # 3. Segmentation Dice
+            seg_preds = torch.argmax(outputs['segmentation'], dim=1)
+            batch_dice = calculate_dice(seg_preds, masks)
+            all_dices.append(batch_dice)
 
-    # Average metrics
-    avg_loss = total_test_loss / len(test_loader)
-    accuracy = 100 * correct_cls / total_samples
+    # --- FINAL METRIC CALCULATION ---
+    
+    # Macro-F1
+    macro_f1 = f1_score(all_cls_gt, all_cls_preds, average='macro')
 
-    # Log to W&B (use "test/" prefix to separate from "train/")
+    # Acc@IoU
+    ious_np = np.array(all_ious)
+    acc_iou_50 = np.mean(ious_np >= 0.5) * 100
+    acc_iou_75 = np.mean(ious_np >= 0.75) * 100
+
+    # Macro-Dice
+    avg_dice = np.mean(all_dices)
+
+    print(f"\n[Pipeline Metrics]")
+    print(f"Macro-F1: {macro_f1:.4f}")
+    print(f"Acc@IoU=0.5: {acc_iou_50:.2f}%")
+    print(f"Acc@IoU=0.75: {acc_iou_75:.2f}%")
+    print(f"Macro-Dice: {avg_dice:.4f}")
+
+    # Log to W&B
     wandb.log({
-        "test_loss": avg_loss,
-        "test_cls_loss": total_cls_loss / len(test_loader),
-        "test_loc_loss": total_loc_loss / len(test_loader),
-        "test_seg_loss": total_seg_loss / len(test_loader),
-        "test_accuracy": accuracy
+        "Macro-F1": macro_f1,
+        "Acc@IoU=0.5": acc_iou_50,
+        "Acc@IoU=0.75": acc_iou_75,
+        "Macro-Dice": avg_dice,
+        "test_accuracy": (np.array(all_cls_preds) == np.array(all_cls_gt)).mean() * 100
     })
 
-    print(f"\n[Test Results] Loss: {avg_loss:.4f} | Accuracy: {accuracy:.2f}%")
+    # Error Check for your threshold
+    if macro_f1 < 0.3:
+        print(f"✘ CLASSIFICATION F1 < 0.3: Macro-F1 = {macro_f1:.4f}")
+
+def get_dataloader():
+    # Use standard validation transforms (No random flipping for test)
+    test_transform = A.Compose([
+        A.Resize(224, 224),
+        A.Normalize(),
+        ToTensorV2()
+    ], bbox_params=A.BboxParams(format='pascal_voc', label_fields=['category_ids']))
+
+    # NOTE: Using split="test" as per your code
+    test_ds = OxfordIIITPetDataset(root_dir="./data", split="test", transform=test_transform)
+    return DataLoader(test_ds, batch_size=BATCH_SIZE, shuffle=False)
 
 def main():
-    wandb.init(project="DA6401-Assignment2", name="sequential-split-models")
-    
-    train_loader = get_dataloader()
-
-    # Train models one by one to save GPU space
-    train_multi(train_loader)
-
-    print("\nAll models trained sequentially.")
+    wandb.init(project="DA6401-Assignment2", name="final-metric-eval")
+    test_loader = get_dataloader()
+    train_multi(test_loader)
     wandb.finish()
 
 if __name__ == "__main__":

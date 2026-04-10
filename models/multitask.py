@@ -35,26 +35,41 @@ class MultiTaskPerceptionModel(nn.Module):
         gdown.download(id="1yK0Lk8zhNrrHhrEgkSp44LlXpWE_JVhu", output="localizer.pth", quiet=False)
         gdown.download(id="1BtB5vllX45j387UYStMrXb-54NLY2Y9g", output="unet.pth", quiet=False)
 
-    def load_from_checkpoints(self, cls_path = "classifier.pth", loc_path = "localizer.pth", unet_path = "unet.pth"):
-        # --- Load Task 1 (Backbone + Classifier Head) ---
+    def load_from_checkpoints(self, cls_path="classifier.pth", loc_path="localizer.pth", unet_path="unet.pth"):
+        # 1. Load Task 1: Classification + Shared Backbone
         cls_ckpt = torch.load(cls_path, map_location='cpu')['state_dict']
-        # This will fill both your backbone and your classifier head
         self.load_state_dict(cls_ckpt, strict=False)
-        print("Loaded backbone and classifier head from Task 1")
+        print("✅ Backbone and Classifier loaded.")
 
-        # --- Load Task 2 (Localizer Head only) ---
+        # 2. Load Task 2: Localization (Map 'regression_head' -> 'localizer_head')
         loc_ckpt = torch.load(loc_path, map_location='cpu')['state_dict']
-        # Extract only the keys that belong to the localizer head
-        loc_head_weights = {k: v for k, v in loc_ckpt.items() if "localizer_head" in k}
-        self.load_state_dict(loc_head_weights, strict=False)
-        print("Loaded localizer head from Task 2")
+        loc_mapped = {}
+        for k, v in loc_ckpt.items():
+            if "regression_head" in k:
+                new_key = k.replace("regression_head", "localizer_head")
+                loc_mapped[new_key] = v
+        self.load_state_dict(loc_mapped, strict=False)
+        print(f"✅ Localization head loaded ({len(loc_mapped)} layers).")
 
-        # --- Load Task 3 (Segmentation Decoder only) ---
+        # 3. Load Task 3: Segmentation (Map 'segmentation_head' -> 'segmentator_head')
         unet_ckpt = torch.load(unet_path, map_location='cpu')['state_dict']
-        # Extract only the keys that belong to the UNet decoder/head
-        seg_head_weights = {k: v for k, v in unet_ckpt.items() if "segmentation_decoder" in k}
-        self.load_state_dict(seg_head_weights, strict=False)
-        print("Loaded segmentation head from Task 3")
+        seg_mapped = {}
+        for k, v in unet_ckpt.items():
+            if "segmentation_head" in k:
+                new_key = k.replace("segmentation_head", "segmentator_head")
+                seg_mapped[new_key] = v
+        self.load_state_dict(seg_mapped, strict=False)
+        print(f"✅ Segmentation head loaded ({len(seg_mapped)} layers).")
+
+        # 4. CRITICAL: Freeze the backbone to protect Macro-F1
+        # This prevents the localization loss from corrupting the encoder.
+        for param in self.encoder.parameters():
+            param.requires_grad = False
+        
+        # Set to eval mode by default to ensure Batchnorm/Dropout don't ruin initial F1
+        self.eval() 
+        print("❄️ Encoder Frozen. Model set to Eval mode. F1 score is now protected.")
+
 
     def forward(self, x: torch.Tensor):
         """Unified Forward Pass."""
