@@ -139,6 +139,72 @@ def train_segmenter(train_loader):
     del model, optimizer
     cleanup()
 
+def train_multi(train_loader):
+    model = MultiTaskPerceptionModel(num_breeds=37, seg_classes=3).to(DEVICE)
+    
+    # Example: Partial Fine-Tuning strategy
+    # for param in model.encoder.block1.parameters(): param.requires_grad = False
+
+    # 5. Losses & Optimizer
+    criterion_cls = nn.CrossEntropyLoss()
+    # criterion_loc = IoULoss()
+    criterion_iou = IoULoss()
+    criterion_mse = nn.MSELoss() # Assuming standard PyTorch MSE
+    criterion_seg = nn.CrossEntropyLoss() # For 3-class trimap
+    optimizer = optim.Adam(model.parameters(), lr=1e-4)
+
+    best_loss = float('inf')
+
+    # 6. Loop
+    model.train()
+    for epoch in range(20):
+        total_loss = 0
+        for images, targets in tqdm(train_loader):
+            images = images.to(DEVICE)
+            labels = targets['label'].to(DEVICE)
+            boxes = targets['bbox'].to(DEVICE)
+            masks = targets['mask'].to(DEVICE).long().squeeze(1)
+
+            optimizer.zero_grad()
+            outputs = model(images)
+
+            # Combined Loss Calculation (Task 1.4)
+            loss_cls = criterion_cls(outputs['classification'], labels)
+            # loss_loc = criterion_loc(outputs['localization'], boxes)
+            # Calculate individual losses
+            loss_iou = criterion_iou(outputs['localization'], boxes)
+            loss_mse = criterion_mse(outputs['localization'], boxes)
+
+            # Combine them
+            loss_loc = loss_iou + loss_mse
+            loss_seg = criterion_seg(outputs['segmentation'], masks)
+            
+            # Weighing losses (adjust based on empirical results)
+            loss = loss_cls + ( 0.001* loss_loc) + loss_seg
+            print(loss_cls.item(), loss_loc.item(), loss_seg.item())
+            loss.backward()
+            optimizer.step()
+
+            wandb.log({
+                "epoch": epoch,
+                "cls_loss": loss_cls.item(),
+                "loc_loss": loss_loc.item(),
+                "seg_loss": loss_seg.item()
+            })
+            
+            total_loss += loss.item()
+
+        avg_loss = total_loss / len(train_loader)
+        # Log to W&B
+        wandb.log({
+            "epoch": epoch,
+            "train_loss": total_loss / len(train_loader),
+        })
+        print(f"Epoch {epoch} Loss: {total_loss/len(train_loader):.4f}")
+        if avg_loss < best_loss:
+            best_loss = avg_loss
+            save_checkpoint(model, epoch, best_loss, "multi.pth")
+
 # --- Main Pipeline ---
 def main():
     wandb.init(project="DA6401-Assignment2", name="sequential-split-models")
@@ -148,7 +214,8 @@ def main():
     # Train models one by one to save GPU space
     # train_classifier(train_loader)
     # train_localizer(train_loader)
-    train_segmenter(train_loader)
+    # train_segmenter(train_loader)    
+    train_multi(train_loader)
 
     print("\nAll models trained sequentially.")
     wandb.finish()

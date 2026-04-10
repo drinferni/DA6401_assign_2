@@ -1,3 +1,5 @@
+import os
+
 import torch
 import torch.nn as nn
 from models.vgg11 import VGG11Encoder
@@ -31,44 +33,70 @@ class MultiTaskPerceptionModel(nn.Module):
         self.full_segmentator= VGG11UNet()
         self.segmentator_head = self.full_segmentator.segmentation_head
 
-        gdown.download(id="1HqClAACl_iK59YmA0HEqiQiPoIUWLeJ_", output="classifier.pth", quiet=False)
-        gdown.download(id="1yK0Lk8zhNrrHhrEgkSp44LlXpWE_JVhu", output="localizer.pth", quiet=False)
-        gdown.download(id="1BtB5vllX45j387UYStMrXb-54NLY2Y9g", output="unet.pth", quiet=False)
+        try :
+            gdown.download(id="1HqClAACl_sdaiK59YmA0HEqiQiPoIUWLeJ_", output="classifier.pth", quiet=False)
+        except:
+            pass
+        try:
+            gdown.download(id="1yK0Lk8zhdsaNrrHhrEgkSp44LlXpWE_JVhu", output="localizer.pth", quiet=False)
+        except:
+            pass
+        try:
+            gdown.download(id="1BtB5vlldfX45j387UYStMrXb-54NLY2Y9g", output="unet.pth", quiet=False)
+        except:
+            pass
+        try:
+            gdown.download(id="10_5WQgWklSZH_6085aikf1eBN0iRpHGf", output="multi.pth", quiet=False)
+        except:
+            pass
 
-    def load_from_checkpoints(self, cls_path="classifier.pth", loc_path="localizer.pth", unet_path="unet.pth"):
-        # 1. Load Task 1: Classification + Shared Backbone
-        cls_ckpt = torch.load(cls_path, map_location='cpu')['state_dict']
-        self.load_state_dict(cls_ckpt, strict=False)
-        print("✅ Backbone and Classifier loaded.")
+    def load_from_checkpoints(self, cls_path="classifier.pth", loc_path="localizer.pth", unet_path="unet.pth", final_path="multi.pth"):
+        # --- STRATEGY 1: Load Consolidated "Final" Checkpoint ---
+        if os.path.exists(final_path):
+            print(f"📦 Found consolidated checkpoint: {final_path}. Loading entire model...")
+            ckpt = torch.load(final_path, map_location='cpu')
+            # Handle cases where the dict is wrapped in ['state_dict']
+            state_dict = ckpt.get('state_dict', ckpt) if isinstance(ckpt, dict) else ckpt
+            self.load_state_dict(state_dict)
+            print("✅ Entire model loaded from final checkpoint.")
+            
+        # --- STRATEGY 2: Load Individual Task Checkpoints ---
+        else:
+            print(f"🔍 {final_path} not found. Loading from individual task weights...")
+            
+            # Check if all individual files exist before starting
+            for p in [cls_path, loc_path, unet_path]:
+                if not os.path.exists(p):
+                    raise FileNotFoundError(f"CRITICAL: Weight file '{p}' not found. Cannot assemble model.")
 
-        # 2. Load Task 2: Localization (Map 'regression_head' -> 'localizer_head')
-        loc_ckpt = torch.load(loc_path, map_location='cpu')['state_dict']
-        loc_mapped = {}
-        for k, v in loc_ckpt.items():
-            if "regression_head" in k:
-                new_key = k.replace("regression_head", "localizer_head")
-                loc_mapped[new_key] = v
-        self.load_state_dict(loc_mapped, strict=False)
-        print(f"✅ Localization head loaded ({len(loc_mapped)} layers).")
+            # 1. Load Task 1: Classification + Shared Backbone
+            cls_ckpt = torch.load(cls_path, map_location='cpu')['state_dict']
+            self.load_state_dict(cls_ckpt, strict=False)
+            print("✅ Backbone and Classifier loaded.")
 
-        # 3. Load Task 3: Segmentation (Map 'segmentation_head' -> 'segmentator_head')
-        unet_ckpt = torch.load(unet_path, map_location='cpu')['state_dict']
-        seg_mapped = {}
-        for k, v in unet_ckpt.items():
-            if "segmentation_head" in k:
-                new_key = k.replace("segmentation_head", "segmentator_head")
-                seg_mapped[new_key] = v
-        self.load_state_dict(seg_mapped, strict=False)
-        print(f"✅ Segmentation head loaded ({len(seg_mapped)} layers).")
+            # 2. Load Task 2: Localization
+            loc_ckpt = torch.load(loc_path, map_location='cpu')['state_dict']
+            loc_mapped = {k.replace("regression_head", "localizer_head"): v 
+                            for k, v in loc_ckpt.items() if "regression_head" in k}
+            self.load_state_dict(loc_mapped, strict=False)
+            print(f"✅ Localization head loaded ({len(loc_mapped)} layers).")
 
+            # 3. Load Task 3: Segmentation
+            unet_ckpt = torch.load(unet_path, map_location='cpu')['state_dict']
+            seg_mapped = {k.replace("segmentation_head", "segmentator_head"): v 
+                            for k, v in unet_ckpt.items() if "segmentation_head" in k}
+            self.load_state_dict(seg_mapped, strict=False)
+            print(f"✅ Segmentation head loaded ({len(seg_mapped)} layers).")
+
+        # --- FINAL SETUP (Applies to both strategies) ---
         # 4. CRITICAL: Freeze the backbone to protect Macro-F1
-        # This prevents the localization loss from corrupting the encoder.
-        for param in self.encoder.parameters():
-            param.requires_grad = False
-        
-        # Set to eval mode by default to ensure Batchnorm/Dropout don't ruin initial F1
+        if hasattr(self, 'encoder'):
+            for param in self.encoder.parameters():
+                param.requires_grad = False
+            print("❄️ Encoder Frozen.")
+
         self.eval() 
-        print("❄️ Encoder Frozen. Model set to Eval mode. F1 score is now protected.")
+        print("🚀 Model set to Eval mode. Loading sequence complete.")
 
 
     def forward(self, x: torch.Tensor):
