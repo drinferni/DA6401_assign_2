@@ -1,4 +1,4 @@
 /wandb
 /data
 *.pth
-*.partgit 
+*.part
