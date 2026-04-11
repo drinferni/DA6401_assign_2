@@ -28,19 +28,13 @@ class VGG11Classifier(nn.Module):
             nn.Flatten(),
             
             # FC Layer 1
-            nn.Linear(512 * 7 * 7, 4096),
-            nn.BatchNorm1d(4096),
-            nn.ReLU(True),
-            CustomDropout(p=dropout_p),
-            
-            # FC Layer 2
-            nn.Linear(4096, 4096),
-            nn.BatchNorm1d(4096),
+            nn.Linear(512 * 7 * 7, 512),
+            nn.BatchNorm1d(512),
             nn.ReLU(True),
             CustomDropout(p=dropout_p),
             
             # Output Layer (Logits for 37 classes)
-            nn.Linear(4096, num_classes),
+            nn.Linear(512, num_classes),
         )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:

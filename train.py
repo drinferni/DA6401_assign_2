@@ -12,6 +12,33 @@ import gc
 from data.pets_dataset import OxfordIIITPetDataset
 from models import *
 from losses.iou_loss import IoULoss
+import torch.nn.functional as F
+
+
+class SegLoss(nn.Module):
+    def __init__(self):
+        super(SegLoss, self).__init__()
+
+    def forward(self, pred, target):
+        """
+        Args:
+            pred: Raw logits from the model (before sigmoid)
+            target: Ground truth masks (same shape as pred)
+        """
+        # 1. Binary Cross Entropy with Logits
+        # This is more numerically stable than applying sigmoid then BCE
+        bce = F.binary_cross_entropy_with_logits(pred, target)
+        
+        # 2. Dice Loss
+        pred_sig = torch.sigmoid(pred)
+        
+        # Flatten tensors to ensure the sum works correctly across batches and channels
+        intersection = (pred_sig * target).sum()
+        dice_coeff = (2. * intersection) / (pred_sig.sum() + target.sum() + 1e-6)
+        dice_loss = 1 - dice_coeff
+        
+        return bce + dice_loss
+
 
 # --- Helper for Memory Cleanup ---
 def cleanup():
@@ -110,7 +137,7 @@ def train_localizer(train_loader):
 def train_segmenter(train_loader):
     print("\n--- Training Segmenter ---")
     model = VGG11UNet().to(DEVICE)
-    criterion = nn.CrossEntropyLoss()
+    criterion = seg_loss()
     optimizer = optim.Adam(model.parameters(), lr=1e-4)
     best_loss = float('inf')
 
@@ -157,7 +184,7 @@ def train_multi(train_loader):
 
     # 6. Loop
     model.train()
-    for epoch in range(20):
+    for epoch in range(50):
         total_loss = 0
         for images, targets in tqdm(train_loader):
             images = images.to(DEVICE)
@@ -180,8 +207,8 @@ def train_multi(train_loader):
             loss_seg = criterion_seg(outputs['segmentation'], masks)
             
             # Weighing losses (adjust based on empirical results)
-            loss = loss_cls + ( 0.001* loss_loc) + loss_seg
-            print(loss_cls.item(), loss_loc.item(), loss_seg.item())
+            loss = 0.01* loss_cls +  2.0 * loss_loc + loss_seg
+            # print(loss_cls.item(), loss_loc.item(), loss_seg.item())
             loss.backward()
             optimizer.step()
 

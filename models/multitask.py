@@ -34,21 +34,22 @@ class MultiTaskPerceptionModel(nn.Module):
         self.segmentator_head = self.full_segmentator.segmentation_head
 
         try :
-            gdown.download(id="1HqClAACl_sdaiK59YmA0HEqiQiPoIUWLeJ_", output="classifier.pth", quiet=False)
+            gdown.download(id="1HqClAACl_sdajhbiK59YmA0HEqiQiPoIUWLeJ_", output="classifier.pth", quiet=False)
         except:
             pass
         try:
-            gdown.download(id="1yK0Lk8zhdsaNrrHhrEgkSp44LlXpWE_JVhu", output="localizer.pth", quiet=False)
+            gdown.download(id="1yK0Lk8zhdsaNbrrHhrEgkSp44LlXpWE_JVhu", output="localizer.pth", quiet=False)
         except:
             pass
         try:
-            gdown.download(id="1BtB5vlldfX45j387UYStMrXb-54NLY2Y9g", output="unet.pth", quiet=False)
+            gdown.download(id="1BtB5vlldfX45jkbkjj387UYStMrXb-54NLY2Y9g", output="unet.pth", quiet=False)
         except:
             pass
         try:
-            gdown.download(id="10_5WQgWklSZH_6085aikf1eBN0iRpHGf", output="multi.pth", quiet=False)
+            gdown.download(id="1OKWoIGGfxPR7EqjRnHbozGexZC7f_KnB", output="multi.pth", quiet=False)
         except:
             pass
+        self.load_from_checkpoints()
 
     def load_from_checkpoints(self, cls_path="classifier.pth", loc_path="localizer.pth", unet_path="unet.pth", final_path="multi.pth"):
         # --- STRATEGY 1: Load Consolidated "Final" Checkpoint ---
