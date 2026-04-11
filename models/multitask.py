@@ -46,7 +46,7 @@ class MultiTaskPerceptionModel(nn.Module):
         except:
             pass
         try:
-            gdown.download(id="17cP__kEY6d-jxImcN1z2g3xrR6mQ9yGn", output="multi.pth", quiet=False)
+            gdown.download(id="1wBrg_lJ5NwYFqgOv1gTpWiEoqS2mD3yh", output="multi.pth", quiet=False)
         except:
             pass
         self.load_from_checkpoints()

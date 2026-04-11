@@ -57,6 +57,31 @@ def calculate_dice(pred_mask, gt_mask, num_classes=3):
         dice_scores.append(dice.item())
     return np.mean(dice_scores)
 
+def decode_segmap(image, num_classes=3):
+    # Define a color map for each class (RGB)
+    label_colors = np.array([
+        (0, 0, 0),       # Class 0: Background
+        (255, 0, 0),     # Class 1: Red
+        (0, 0, 255),     # Class 2: Blue
+    ])
+
+    r = np.zeros_like(image).astype(np.uint8)
+    g = np.zeros_like(image).astype(np.uint8)
+    b = np.zeros_like(image).astype(np.uint8)
+
+    for l in range(0, num_classes):
+        idx = image == l
+        r[idx] = label_colors[l, 0]
+        g[idx] = label_colors[l, 1]
+        b[idx] = label_colors[l, 2]
+
+    rgb = np.stack([r, g, b], axis=2)
+    return rgb
+
+# Usage inside the plotting section:
+# colored_mask = decode_segmap(prediction)
+# ax[1].imshow(colored_mask)
+
 def train_multi(test_loader):
     print("\n--- Evaluating Multi-Task Pipeline ---")
 
@@ -80,6 +105,13 @@ def train_multi(test_loader):
 
             outputs = model(images)
 
+            # print(outputs['segmentation'][0])
+            # return
+            # fig, ax = plt.subplots(1, 2, figsize=(12, 6))
+            # ax[1].imshow(c)
+            # plt.show()
+
+
             # 1. Classification Data
             _, preds = torch.max(outputs['classification'], 1)
             all_cls_preds.extend(preds.cpu().numpy())
@@ -93,6 +125,7 @@ def train_multi(test_loader):
 
             # 3. Segmentation Dice
             seg_preds = torch.argmax(outputs['segmentation'], dim=1)
+            print(seg_preds[0])
             batch_dice = calculate_dice(seg_preds, masks)
             all_dices.append(batch_dice)
 

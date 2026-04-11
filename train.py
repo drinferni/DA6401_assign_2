@@ -177,7 +177,8 @@ def train_multi(train_loader):
     # criterion_loc = IoULoss()
     criterion_iou = IoULoss()
     criterion_mse = nn.MSELoss() # Assuming standard PyTorch MSE
-    criterion_seg = nn.CrossEntropyLoss() # For 3-class trimap
+    weights = torch.tensor([0.1, 1.0, 1.0]).cuda() 
+    criterion_seg = nn.CrossEntropyLoss(weight=weights) # For 3-class trimap
     optimizer = optim.Adam(model.parameters(), lr=1e-4)
 
     best_loss = float('inf')
@@ -207,7 +208,7 @@ def train_multi(train_loader):
             loss_seg = criterion_seg(outputs['segmentation'], masks)
             
             # Weighing losses (adjust based on empirical results)
-            loss = 0.01* loss_cls +  20.0 * loss_loc + 20.0 * loss_seg
+            loss = 0.01* loss_cls +  0.01 * loss_loc + 20.0 * loss_seg
             # print(loss_cls.item(), loss_loc.item(), loss_seg.item())
             loss.backward()
             optimizer.step()
