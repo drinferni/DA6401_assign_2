@@ -184,7 +184,7 @@ def train_multi(train_loader):
 
     # 6. Loop
     model.train()
-    for epoch in range(50):
+    for epoch in range(15):
         total_loss = 0
         for images, targets in tqdm(train_loader):
             images = images.to(DEVICE)

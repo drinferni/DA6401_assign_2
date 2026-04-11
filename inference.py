@@ -139,7 +139,7 @@ def get_dataloader():
     ], bbox_params=A.BboxParams(format='pascal_voc', label_fields=['category_ids']))
 
     # NOTE: Using split="test" as per your code
-    test_ds = OxfordIIITPetDataset(root_dir="./data", split="trainval", transform=test_transform)
+    test_ds = OxfordIIITPetDataset(root_dir="./data", split="test", transform=test_transform)
     return DataLoader(test_ds, batch_size=BATCH_SIZE, shuffle=False)
 
 def main():
