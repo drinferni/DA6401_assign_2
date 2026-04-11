@@ -208,7 +208,7 @@ def train_multi(train_loader):
             loss_seg = criterion_seg(outputs['segmentation'], masks)
             
             # Weighing losses (adjust based on empirical results)
-            loss = 0.01* loss_cls +  0.01 * loss_loc + 20.0 * loss_seg
+            loss = 0.01* loss_cls +  0.01 * loss_loc + 200.0 * loss_seg
             # print(loss_cls.item(), loss_loc.item(), loss_seg.item())
             loss.backward()
             optimizer.step()
