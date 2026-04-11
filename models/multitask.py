@@ -34,60 +34,35 @@ class MultiTaskPerceptionModel(nn.Module):
         self.segmentator_head = self.full_segmentator.segmentation_head
 
         try :
-            gdown.download(id="1HqClAACl_sdajhbiK59YmA0HEqiQiPoIUWLeJ_", output="classifier.pth", quiet=False)
+            gdown.download(id="1RR5KrgDdAz3HUQqtNvp-4Dw-l4whD1UE", output="classifier.pth", quiet=False)
         except:
             pass
         try:
-            gdown.download(id="1yK0Lk8zhdsaNbrrHhrEgkSp44LlXpWE_JVhu", output="localizer.pth", quiet=False)
+            gdown.download(id="1heclTBH3jEAraubxbEAX_CB0ctZ-Qo-q", output="localizer.pth", quiet=False)
         except:
             pass
         try:
-            gdown.download(id="1BtB5vlldfX45jkbkjj387UYStMrXb-54NLY2Y9g", output="unet.pth", quiet=False)
-        except:
-            pass
-        try:
-            gdown.download(id="1OXfTeAGv1GwvYh_YqsbZawwTr1cFUwgu", output="multi.pth", quiet=False)
+            gdown.download(id="1ptZWXITMOE_mac1SRZKIi9qi5FUH1qLf", output="unet.pth", quiet=False)
         except:
             pass
         self.load_from_checkpoints()
 
-    def load_from_checkpoints(self, cls_path="classifier.pth", loc_path="localizer.pth", unet_path="unet.pth", final_path="multi.pth"):
-        # --- STRATEGY 1: Load Consolidated "Final" Checkpoint ---
-        if os.path.exists(final_path):
-            print(f"📦 Found consolidated checkpoint: {final_path}. Loading entire model...")
-            ckpt = torch.load(final_path, map_location='cpu')
-            # Handle cases where the dict is wrapped in ['state_dict']
-            state_dict = ckpt.get('state_dict', ckpt) if isinstance(ckpt, dict) else ckpt
-            self.load_state_dict(state_dict)
-            print("✅ Entire model loaded from final checkpoint.")
-            
-        # --- STRATEGY 2: Load Individual Task Checkpoints ---
-        else:
-            print(f"🔍 {final_path} not found. Loading from individual task weights...")
-            
-            # Check if all individual files exist before starting
-            for p in [cls_path, loc_path, unet_path]:
-                if not os.path.exists(p):
-                    raise FileNotFoundError(f"CRITICAL: Weight file '{p}' not found. Cannot assemble model.")
+    def load_from_checkpoints(self, cls_path="classifier.pth", loc_path="localizer.pth", unet_path="unet.pth"):
+        # 1. Load Task 1: Classification + Shared Backbone
+        cls_ckpt = torch.load(cls_path, map_location='cpu')['state_dict']
+        state_dict = cls_ckpt.get('state_dict', cls_ckpt) if isinstance(cls_ckpt, dict) else cls_ckpt
+        self.load_state_dict(state_dict)
+        print("✅ Backbone and Classifier loaded.")
 
-            # 1. Load Task 1: Classification + Shared Backbone
-            cls_ckpt = torch.load(cls_path, map_location='cpu')['state_dict']
-            self.load_state_dict(cls_ckpt, strict=False)
-            print("✅ Backbone and Classifier loaded.")
+        # 2. Load Task 2: Localization
+        loc_ckpt = torch.load(loc_path, map_location='cpu')['state_dict']
+        state_dict = loc_ckpt.get('state_dict', loc_ckpt) if isinstance(loc_ckpt, dict) else loc_ckpt
+        self.load_state_dict(state_dict)
 
-            # 2. Load Task 2: Localization
-            loc_ckpt = torch.load(loc_path, map_location='cpu')['state_dict']
-            loc_mapped = {k.replace("regression_head", "localizer_head"): v 
-                            for k, v in loc_ckpt.items() if "regression_head" in k}
-            self.load_state_dict(loc_mapped, strict=False)
-            print(f"✅ Localization head loaded ({len(loc_mapped)} layers).")
-
-            # 3. Load Task 3: Segmentation
-            unet_ckpt = torch.load(unet_path, map_location='cpu')['state_dict']
-            seg_mapped = {k.replace("segmentation_head", "segmentator_head"): v 
-                            for k, v in unet_ckpt.items() if "segmentation_head" in k}
-            self.load_state_dict(seg_mapped, strict=False)
-            print(f"✅ Segmentation head loaded ({len(seg_mapped)} layers).")
+        # 3. Load Task 3: Segmentation
+        unet_ckpt = torch.load(unet_path, map_location='cpu')['state_dict']
+        state_dict = unet_ckpt.get('state_dict', unet_ckpt) if isinstance(unet_ckpt, dict) else unet_ckpt
+        self.load_state_dict(state_dict)
 
         # --- FINAL SETUP (Applies to both strategies) ---
         # 4. CRITICAL: Freeze the backbone to protect Macro-F1
