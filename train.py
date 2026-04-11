@@ -184,7 +184,7 @@ def train_multi(train_loader):
 
     # 6. Loop
     model.train()
-    for epoch in range(15):
+    for epoch in range(5):
         total_loss = 0
         for images, targets in tqdm(train_loader):
             images = images.to(DEVICE)
@@ -207,7 +207,7 @@ def train_multi(train_loader):
             loss_seg = criterion_seg(outputs['segmentation'], masks)
             
             # Weighing losses (adjust based on empirical results)
-            loss = 0.01* loss_cls +  2.0 * loss_loc + loss_seg
+            loss = 0.01* loss_cls +  20.0 * loss_loc + 20.0 * loss_seg
             # print(loss_cls.item(), loss_loc.item(), loss_seg.item())
             loss.backward()
             optimizer.step()
