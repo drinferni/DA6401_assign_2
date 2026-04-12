@@ -12,28 +12,17 @@ class VGG11Classifier(nn.Module):
         Initialize the VGG11Classifier model.
         """
         super(VGG11Classifier, self).__init__()
-        
-        # 1. Instantiate the Encoder (Contracting Path)
         self.encoder = VGG11Encoder(in_channels=in_channels)
-        
-        # 2. Global Average Pooling 
-        # This ensures that even if input images aren't exactly 224x224, 
-        # the feature map is reduced to a fixed 7x7 spatial size before flattening.
         self.avgpool = nn.AdaptiveAvgPool2d((7, 7))
 
-        # 3. Modernized VGG Classification Head
-        # Standard VGG uses 4096 -> 4096 -> num_classes.
-        # We include BatchNorm1d and CustomDropout as per Task 1.1.
         self.classifier_head = nn.Sequential(
             nn.Flatten(),
             
-            # FC Layer 1
             nn.Linear(512 * 7 * 7, 512),
             nn.BatchNorm1d(512),
             nn.ReLU(True),
             CustomDropout(p=dropout_p),
             
-            # Output Layer (Logits for 37 classes)
             nn.Linear(512, num_classes),
         )
 
@@ -45,17 +34,7 @@ class VGG11Classifier(nn.Module):
         Returns:
             Classification logits [B, 37].
         """
-        # Extract features using the VGG11 backbone
-        # We do not need skip connections for pure classification
-        features = self.encoder(x, return_features=False) 
-        
-        # Pool to 7x7 and flatten
+        features = self.encoder(x, return_features=False)  
         pooled_features = self.avgpool(features)
-        
-        # Pass through the classification head
         logits = self.classifier_head(pooled_features)
-        
         return logits
-
-# Usage for Task 2.1 & 2.2:
-# model = VGG11Classifier(num_classes=37, dropout_p=0.5)

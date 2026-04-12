@@ -3,35 +3,41 @@ import torch.nn as nn
 from models.vgg11 import VGG11Encoder
 from models.layers import CustomDropout
 
+# class for segmentation head
 class UNetDecoderHead(nn.Module):
-    """
-    Everything after the Encoder: Includes Upsampling, 
-    Skip Connection fusion, and the final classification layer.
-    """
+
     def __init__(self, num_classes: int, dropout_p: float):
+        """
+        Initialize the VGG11UNet model.
+
+        Args:
+            num_classes: Number of output classes.
+            in_channels: Number of input channels.
+            dropout_p: Dropout probability for the segmentation head.
+        """
         super(UNetDecoderHead, self).__init__()
 
-        # Block 5: Upsample bottleneck [7x7 -> 14x14]
+        # Block_5
         self.up5 = nn.ConvTranspose2d(512, 512, kernel_size=2, stride=2)
         self.dec5 = self._decoder_block(512 + 512, 512, dropout_p)
 
-        # Block 4: Upsample [14x14 -> 28x28]
+        # Block_4
         self.up4 = nn.ConvTranspose2d(512, 512, kernel_size=2, stride=2)
         self.dec4 = self._decoder_block(512 + 512, 512, dropout_p)
 
-        # Block 3: Upsample [28x28 -> 56x56]
+        # Block_3
         self.up3 = nn.ConvTranspose2d(512, 256, kernel_size=2, stride=2)
         self.dec3 = self._decoder_block(256 + 256, 256, 0.0)
 
-        # Block 2: Upsample [56x56 -> 112x112]
+        # Block_2
         self.up2 = nn.ConvTranspose2d(256, 128, kernel_size=2, stride=2)
         self.dec2 = self._decoder_block(128 + 128, 128, 0.0)
 
-        # Block 1: Upsample [112x112 -> 224x224]
+        # Block_1
         self.up1 = nn.ConvTranspose2d(128, 64, kernel_size=2, stride=2)
         self.dec1 = self._decoder_block(64 + 64, 64, 0.0)
 
-        # Final 1x1 Conv
+        # Final Layer
         self.final_conv = nn.Conv2d(64, num_classes, kernel_size=1)
 
     def _decoder_block(self, in_ch, out_ch, dropout_p):
@@ -45,6 +51,13 @@ class UNetDecoderHead(nn.Module):
         return nn.Sequential(*layers)
 
     def forward(self, bottleneck: torch.Tensor, skips: dict) -> torch.Tensor:
+        """Forward pass for segmentation model.
+        Args:
+            x: Input tensor of shape [B, in_channels, H, W].
+
+        Returns:
+            Segmentation logits [B, num_classes, H, W].
+        """
         # Stage 5
         x = self.up5(bottleneck)
         x = torch.cat([x, skips["skip5"]], dim=1)
@@ -72,20 +85,13 @@ class UNetDecoderHead(nn.Module):
 
         return self.final_conv(x)
 
-
+# main class
 class VGG11UNet(nn.Module):
     def __init__(self, num_classes: int = 3, in_channels: int = 3, dropout_p: float = 0.5):
         super(VGG11UNet, self).__init__()
-        
-        # 1. The Encoder
         self.encoder = VGG11Encoder(in_channels=in_channels)
-        
-        # 2. The Head (Everything else)
         self.segmentation_head = UNetDecoderHead(num_classes, dropout_p)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        # Encoder returns the deep features and the skip connection dictionary
         bottleneck, skips = self.encoder(x, return_features=True)
-        
-        # Pass both to the head
         return self.segmentation_head(bottleneck, skips)

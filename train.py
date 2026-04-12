@@ -8,48 +8,22 @@ import wandb
 from tqdm import tqdm
 import gc
 
-# Import your classes
 from data.pets_dataset import OxfordIIITPetDataset
 from models import *
 from losses.iou_loss import IoULoss
 import torch.nn.functional as F
 
 
-class SegLoss(nn.Module):
-    def __init__(self):
-        super(SegLoss, self).__init__()
-
-    def forward(self, pred, target):
-        """
-        Args:
-            pred: Raw logits from the model (before sigmoid)
-            target: Ground truth masks (same shape as pred)
-        """
-        # 1. Binary Cross Entropy with Logits
-        # This is more numerically stable than applying sigmoid then BCE
-        bce = F.binary_cross_entropy_with_logits(pred, target)
-        
-        # 2. Dice Loss
-        pred_sig = torch.sigmoid(pred)
-        
-        # Flatten tensors to ensure the sum works correctly across batches and channels
-        intersection = (pred_sig * target).sum()
-        dice_coeff = (2. * intersection) / (pred_sig.sum() + target.sum() + 1e-6)
-        dice_loss = 1 - dice_coeff
-        
-        return bce + dice_loss
-
-
-# --- Helper for Memory Cleanup ---
 def cleanup():
     gc.collect()
     torch.cuda.empty_cache()
 
-# --- Common Setup ---
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 EPOCHS = 20
 BATCH_SIZE = 16
 
+
+# function to load data
 def get_dataloader():
     train_transform = A.Compose([
         A.Resize(224, 224),
@@ -61,6 +35,8 @@ def get_dataloader():
     train_ds = OxfordIIITPetDataset(root_dir="./data", split="trainval", transform=train_transform)
     return DataLoader(train_ds, batch_size=BATCH_SIZE, shuffle=True)
 
+
+# function to save the model
 def save_checkpoint(model, epoch, metric, filename):
     """Saves checkpoint in the requested format."""
     payload = {
@@ -71,8 +47,7 @@ def save_checkpoint(model, epoch, metric, filename):
     torch.save(payload, filename)
     print(f"Checkpoint saved to {filename} (Metric: {metric:.4f})")
 
-# --- Training Functions ---
-
+# function to test classifier independantly
 def train_classifier(train_loader):
     print("\n--- Training Classifier ---")
     model = VGG11Classifier().to(DEVICE)
@@ -103,6 +78,7 @@ def train_classifier(train_loader):
     del model, optimizer
     cleanup()
 
+# function to train localizer independandly
 def train_localizer(train_loader):
     print("\n--- Training Localizer ---")
     model = VGG11Localizer().to(DEVICE)
@@ -134,10 +110,13 @@ def train_localizer(train_loader):
     del model, optimizer
     cleanup()
 
+
+# function to train segmenter independantly
 def train_segmenter(train_loader):
     print("\n--- Training Segmenter ---")
     model = VGG11UNet().to(DEVICE)
-    criterion = seg_loss()
+    weights = torch.tensor([0.1, 1.0, 1.0]).cuda() 
+    criterion= nn.CrossEntropyLoss(weight=weights)
     optimizer = optim.Adam(model.parameters(), lr=1e-4)
     best_loss = float('inf')
 
@@ -166,26 +145,23 @@ def train_segmenter(train_loader):
     del model, optimizer
     cleanup()
 
+
+# function to train multi task
 def train_multi(train_loader):
     model = MultiTaskPerceptionModel(num_breeds=37, seg_classes=3).to(DEVICE)
     
-    # Example: Partial Fine-Tuning strategy
-    # for param in model.encoder.block1.parameters(): param.requires_grad = False
-
-    # 5. Losses & Optimizer
     criterion_cls = nn.CrossEntropyLoss()
-    # criterion_loc = IoULoss()
     criterion_iou = IoULoss()
-    criterion_mse = nn.MSELoss() # Assuming standard PyTorch MSE
+    criterion_mse = nn.MSELoss()
     weights = torch.tensor([0.1, 1.0, 1.0]).cuda() 
-    criterion_seg = nn.CrossEntropyLoss(weight=weights) # For 3-class trimap
+    criterion_seg = nn.CrossEntropyLoss(weight=weights)
     optimizer = optim.Adam(model.parameters(), lr=1e-6)
 
     best_loss = float('inf')
 
     # 6. Loop
     model.train()
-    for epoch in range(20):
+    for epoch in range(2):
         total_loss = 0
         for images, targets in tqdm(train_loader):
             images = images.to(DEVICE)
@@ -196,18 +172,14 @@ def train_multi(train_loader):
             optimizer.zero_grad()
             outputs = model(images)
 
-            # Combined Loss Calculation (Task 1.4)
+
             loss_cls = criterion_cls(outputs['classification'], labels)
-            # loss_loc = criterion_loc(outputs['localization'], boxes)
-            # Calculate individual losses
             loss_iou = criterion_iou(outputs['localization'], boxes)
             loss_mse = criterion_mse(outputs['localization'], boxes)
-
-            # Combine them
             loss_loc = loss_iou + loss_mse
             loss_seg = criterion_seg(outputs['segmentation'], masks)
             
-            # Weighing losses (adjust based on empirical results)
+            # Weighing losses 
             loss = 0.001* loss_cls +  loss_loc + 2.0 * loss_seg
             # print(loss_cls.item(), loss_loc.item(), loss_seg.item())
             loss.backward()
@@ -223,7 +195,7 @@ def train_multi(train_loader):
             total_loss += loss.item()
 
         avg_loss = total_loss / len(train_loader)
-        # Log to W&B
+
         wandb.log({
             "epoch": epoch,
             "train_loss": total_loss / len(train_loader),
@@ -233,13 +205,11 @@ def train_multi(train_loader):
             best_loss = avg_loss
             save_checkpoint(model, epoch, best_loss, "multi.pth")
 
-# --- Main Pipeline ---
 def main():
     wandb.init(project="DA6401-Assignment2", name="sequential-split-models")
     
     train_loader = get_dataloader()
 
-    # Train models one by one to save GPU space
     # train_classifier(train_loader)
     # train_localizer(train_loader)
     # train_segmenter(train_loader)    

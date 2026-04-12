@@ -5,16 +5,12 @@ import torch.nn as nn
 from models.layers import CustomDropout 
 
 class VGG11Encoder(nn.Module):
-    """VGG11-style encoder with skip connections for U-Net."""
+    """VGG11-style encoder with optional intermediate feature returns.
+    """
 
     def __init__(self, in_channels: int = 3):
         super(VGG11Encoder, self).__init__()
-
-        # Define the VGG11 configuration (number of filters per layer)
-        # 'M' stands for MaxPool2d
-        # VGG11: 1 conv -> M -> 1 conv -> M -> 2 conv -> M -> 2 conv -> M -> 2 conv -> M
-        
-        # Block 1: 64
+        # Block 1
         self.block1 = nn.Sequential(
             nn.Conv2d(in_channels, 64, kernel_size=3, padding=1),
             nn.BatchNorm2d(64),
@@ -22,7 +18,7 @@ class VGG11Encoder(nn.Module):
         )
         self.pool1 = nn.MaxPool2d(kernel_size=2, stride=2)
 
-        # Block 2: 128
+        # Block 2
         self.block2 = nn.Sequential(
             nn.Conv2d(64, 128, kernel_size=3, padding=1),
             nn.BatchNorm2d(128),
@@ -30,7 +26,7 @@ class VGG11Encoder(nn.Module):
         )
         self.pool2 = nn.MaxPool2d(kernel_size=2, stride=2)
 
-        # Block 3: 256, 256
+        # Block 3
         self.block3 = nn.Sequential(
             nn.Conv2d(128, 256, kernel_size=3, padding=1),
             nn.BatchNorm2d(256),
@@ -41,7 +37,7 @@ class VGG11Encoder(nn.Module):
         )
         self.pool3 = nn.MaxPool2d(kernel_size=2, stride=2)
 
-        # Block 4: 512, 512
+        # Block 4
         self.block4 = nn.Sequential(
             nn.Conv2d(256, 512, kernel_size=3, padding=1),
             nn.BatchNorm2d(512),
@@ -52,7 +48,7 @@ class VGG11Encoder(nn.Module):
         )
         self.pool4 = nn.MaxPool2d(kernel_size=2, stride=2)
 
-        # Block 5: 512, 512 (Bottleneck)
+        # Block 5
         self.block5 = nn.Sequential(
             nn.Conv2d(512, 512, kernel_size=3, padding=1),
             nn.BatchNorm2d(512),
@@ -66,15 +62,16 @@ class VGG11Encoder(nn.Module):
     def forward(
         self, x: torch.Tensor, return_features: bool = False
     ) -> Union[torch.Tensor, Tuple[torch.Tensor, Dict[str, torch.Tensor]]]:
-        """
-        Forward pass.
-        
+        """Forward pass.
+
         Args:
-            x: Input image tensor [B, 3, H, W].
-            return_features: If True, returns features from each block for U-Net skip connections.
+            x: input image tensor [B, 3, H, W].
+            return_features: if True, also return skip maps for U-Net decoder.
+
+        Returns:
+            - if return_features=False: bottleneck feature tensor.
+            - if return_features=True: (bottleneck, feature_dict).
         """
-        # Feature Extraction and Skip Map Storage
-        # We save features BEFORE pooling to preserve spatial resolution for the decoder
         
         f1 = self.block1(x)
         p1 = self.pool1(f1)
@@ -92,7 +89,7 @@ class VGG11Encoder(nn.Module):
         bottleneck = self.pool5(f5)
 
         if return_features:
-            # feature_dict will be used by the U-Net style decoder for concatenation
+            # feature_dict for unet (optional)
             feature_dict = {
                 "skip1": f1, # 64 channels
                 "skip2": f2, # 128 channels
