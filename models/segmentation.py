@@ -4,6 +4,11 @@ from models.vgg11 import VGG11Encoder
 from models.layers import CustomDropout
 
 # class for segmentation head
+
+# For segmentation, using a combination of Cross-Entropy and Dice Loss was most effective. In cross entropy, I also used weights for the classes
+# with foreground detection,getting the least weight to combat the problem with pixel accuracy, as discussed in 2.6. 
+# Cross-Entropy provided stable gradients at the pixel level, while Dice Loss directly optimised for the overlap, preventing the model from becoming biased 
+# towards the background pixels."
 class UNetDecoderHead(nn.Module):
 
     def __init__(self, num_classes: int, dropout_p: float):

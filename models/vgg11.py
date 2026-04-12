@@ -59,6 +59,10 @@ class VGG11Encoder(nn.Module):
         )
         self.pool5 = nn.MaxPool2d(kernel_size=2, stride=2)
 
+        # batch normalisation and Dropout are powerful regularisation techniques. These were crucial for this assignment as VGG11 is a very big model 
+        # with millions of parameters, while our dataset consists of only a few thousand images. There was a high risk of overfitting. Due to this, 
+        # I decided to add both of these to all the block in the model. 
+
     def forward(
         self, x: torch.Tensor, return_features: bool = False
     ) -> Union[torch.Tensor, Tuple[torch.Tensor, Dict[str, torch.Tensor]]]:
